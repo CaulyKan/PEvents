@@ -5,9 +5,11 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Text;
 using System.Threading.Tasks;
 using System.Threading;
 using System.Reflection;
+using System.Windows;
 using System.ComponentModel;
 
 namespace PEvents
@@ -18,31 +20,16 @@ namespace PEvents
 
         public event PEventManager.PEventHandler<TEvent> Execute;
 
-        public event PEventManager.PEventErrorEventHandler<TEvent> Error;
+        public event PEventManager.NuErrorEventHandler<TEvent> OnError;
 
-        public event PEventManager.PEventHandler<TEvent> Success;
+        public event PEventManager.PEventHandler<TEvent> OnSuccess;
 
-        public event PEventManager.PEventHandler<TEvent> Complete;
+        public event PEventManager.PEventHandler<TEvent> OnFinish;
 
         private Task task;
         private CancellationTokenSource token;
 
-        public PEvent()
-        {
-            this.Prepare += this.OnPrepare;
-            this.Execute += this.OnExecute;
-            this.Error += this.OnError;
-            this.Success += this.OnSuccess;
-            this.Complete += this.OnComplete;
-        }
-
-        public virtual void OnPrepare(TEvent e) { }
-        public virtual void OnExecute(TEvent e) { }
-        public virtual void OnError(TEvent e, Exception ex) { }
-        public virtual void OnSuccess(TEvent e) { }
-        public virtual void OnComplete(TEvent e) { }
-
-        public bool IsSuccess
+        public bool Success
         {
             get;
             private set;
@@ -55,7 +42,10 @@ namespace PEvents
 
             token.Cancel();
         }
-        
+
+        /// <summary>
+        /// 等待一个异步中的事件执行完成。
+        /// </summary>
         public void Wait()
         {
             if (this.task == null)
@@ -63,13 +53,16 @@ namespace PEvents
 
             this.task.Wait();
         }
-        
-        public virtual void Trigger(PEventManager manager)
+
+        /// <summary>
+        /// 触发该全局事件。
+        /// </summary>
+        public virtual void Trigger()
         {
             if (this.task != null)
                 throw new InvalidOperationException("This event can't be triggered before the previous lifecycle is finished.");
 
-            manager.SetupEventHandlers(this);
+            PEventManager.Instance.SetupEventHandlers(this);
 
             if (this.Prepare != null)
             {
@@ -94,12 +87,12 @@ namespace PEvents
                         this.Execute(this as TEvent);
                     }, token);
 
-                task.ContinueWith(task => TaskComplete(task, manager));
+                task.ContinueWith(TaskComplete);
                 task.Start();
             }
             else
             {
-                TaskComplete(null, manager);
+                TaskComplete(null);
             }
         }
         
@@ -109,40 +102,40 @@ namespace PEvents
             {
                 if (e is PEventCancelException && (e as PEventCancelException).Success == true)
                 {
-                    this.IsSuccess = true;
-                    if (this.Success != null)
+                    this.Success = true;
+                    if (this.OnSuccess != null)
                     {
-                        this.Success(this as TEvent);
+                        this.OnSuccess(this as TEvent);
                     }
                 }
                 else
                 {
-                    this.IsSuccess = false;
-                    if (this.Error != null)
+                    this.Success = false;
+                    if (this.OnError != null)
                     {
-                        this.Error(this as TEvent, e);
+                        this.OnError(this as TEvent, e);
                     }
                 }
             }
             finally
             {
-                if (this.Complete != null)
-                    this.Complete(this as TEvent);
+                if (this.OnFinish != null)
+                    this.OnFinish(this as TEvent);
             }
         }
 
-        internal void TaskComplete(Task t, PEventManager manager)
+        internal void TaskComplete(Task t)
         {
-            var ctrl = manager.MainThreadControl;
+            var ctrl = PEventManager.Instance.MainThreadControl;
             
             if (ctrl != null && ctrl is ISynchronizeInvoke && (ctrl as ISynchronizeInvoke).InvokeRequired)
             {
-                (ctrl as ISynchronizeInvoke).Invoke(new Action<Task>(task => TaskComplete(task, manager)), new object[] { t });
+                (ctrl as ISynchronizeInvoke).Invoke(new Action<Task>(TaskComplete), new object[] { t });
             }
 #if WPF
             else if (ctrl != null && ctrl is System.Windows.Threading.DispatcherObject && !(ctrl as System.Windows.Threading.DispatcherObject).Dispatcher.CheckAccess())
             {
-                (ctrl as System.Windows.Threading.DispatcherObject).Dispatcher.Invoke(new Action<Task>(task => TaskComplete(task, manager)), new object[] { t });
+                (ctrl as System.Windows.Threading.DispatcherObject).Dispatcher.Invoke(new Action<Task>(TaskComplete), new object[] { t });
             }
 #endif
             else
@@ -152,18 +145,18 @@ namespace PEvents
                     if (this.task != null && this.task.IsFaulted &&
                         !(this.task.Exception.GetBaseException() is PEventCancelException && !(this.task.Exception.GetBaseException() as PEventCancelException).Success))
                     {
-                        this.IsSuccess = false;
-                        if (this.Error != null)
+                        this.Success = false;
+                        if (this.OnError != null)
                         {
-                            this.Error(this as TEvent, this.task.Exception.GetBaseException());
+                            this.OnError(this as TEvent, this.task.Exception.GetBaseException());
                         }
                     }
                     else
                     {
-                        this.IsSuccess = true;
-                        if (this.Success != null)
+                        this.Success = true;
+                        if (this.OnSuccess != null)
                         {
-                            this.Success(this as TEvent);
+                            this.OnSuccess(this as TEvent);
                         }
                     }
                 }
@@ -171,8 +164,8 @@ namespace PEvents
                 {
                     this.task = null;
 
-                    if (this.Complete != null)
-                        this.Complete(this as TEvent);
+                    if (this.OnFinish != null)
+                        this.OnFinish(this as TEvent);
                 }
             }
         }
@@ -180,9 +173,9 @@ namespace PEvents
     
     public abstract class PMessage<TMessage, TResult> where TMessage : PMessage<TMessage, TResult>
     {
-        public event PEventManager.PMessageHandler<TMessage, TResult> SyncRefreshData;
-        public event PEventManager.PMessageHandler<TMessage, TResult> AsyncRefreshData;
-        public event PEventManager.PMessageResultHandler<TResult> DataRefreshed;
+        public event PEventManager.NuMessageHandler<TMessage, TResult> SyncRefreshData;
+        public event PEventManager.NuMessageHandler<TMessage, TResult> AsyncRefreshData;
+        public event PEventManager.NuMessageResultHandler<TResult> DataRefreshed;
 
         public TResult Result
         {
@@ -304,17 +297,13 @@ namespace PEvents
             }
         }
     }
-    
+
+    /// <summary>
+    /// 引发该异常可以以指定的Success或Fail的结果提前中断事件执行。
+    /// </summary>
     public class PEventCancelException : Exception 
     {
         public bool Success { get; set; }
-        public bool IgnoreSuccess { get; set; } = false;
-
-        public PEventCancelException() : base()
-        {
-            this.IgnoreSuccess = true;
-        }
-
         public PEventCancelException(bool success ) : base()
         {
             this.Success = success;
@@ -333,16 +322,16 @@ namespace PEvents
     
     public class PEventManager
     {
-        private Dictionary<DelegateType, Dictionary<Type, List<PEventWeakDelegate>>> handlers = new Dictionary<DelegateType,Dictionary<Type,List<PEventWeakDelegate>>>()
+        private Dictionary<DelegateType, Dictionary<Type, List<NuWeakDelegate>>> handlers = new Dictionary<DelegateType,Dictionary<Type,List<NuWeakDelegate>>>()
         {
-            { DelegateType.EventPrepare, new Dictionary<Type, List<PEventWeakDelegate>>() },
-            { DelegateType.EventExecute, new Dictionary<Type, List<PEventWeakDelegate>>() },
-            { DelegateType.EventOnError, new Dictionary<Type, List<PEventWeakDelegate>>() },
-            { DelegateType.EventOnSuccess, new Dictionary<Type, List<PEventWeakDelegate>>() },
-            { DelegateType.EventOnFinish, new Dictionary<Type, List<PEventWeakDelegate>>() },
-            { DelegateType.MessageSyncRefreshData, new Dictionary<Type, List<PEventWeakDelegate>>() },
-            { DelegateType.MessageAsyncRefreshData, new Dictionary<Type, List<PEventWeakDelegate>>() },
-            { DelegateType.MessageDataRefreshed, new Dictionary<Type, List<PEventWeakDelegate>>() },
+            { DelegateType.EventPrepare, new Dictionary<Type, List<NuWeakDelegate>>() },
+            { DelegateType.EventExecute, new Dictionary<Type, List<NuWeakDelegate>>() },
+            { DelegateType.EventOnError, new Dictionary<Type, List<NuWeakDelegate>>() },
+            { DelegateType.EventOnSuccess, new Dictionary<Type, List<NuWeakDelegate>>() },
+            { DelegateType.EventOnFinish, new Dictionary<Type, List<NuWeakDelegate>>() },
+            { DelegateType.MessageSyncRefreshData, new Dictionary<Type, List<NuWeakDelegate>>() },
+            { DelegateType.MessageAsyncRefreshData, new Dictionary<Type, List<NuWeakDelegate>>() },
+            { DelegateType.MessageDataRefreshed, new Dictionary<Type, List<NuWeakDelegate>>() },
         };
 
         public enum DelegateType
@@ -361,7 +350,7 @@ namespace PEvents
         {
             { DelegateType.EventPrepare, typeof(PEventHandler<>) },
             { DelegateType.EventExecute, typeof(PEventHandler<>) },
-            { DelegateType.EventOnError, typeof(PEventErrorEventHandler<>) },
+            { DelegateType.EventOnError, typeof(NuErrorEventHandler<>) },
             { DelegateType.EventOnSuccess, typeof(PEventHandler<>) },
             { DelegateType.EventOnFinish, typeof(PEventHandler<>) },
         };
@@ -389,14 +378,9 @@ namespace PEvents
         }
 
         public delegate void PEventHandler<T>(T args) where T : PEvent<T>;
-        public delegate void PEventErrorEventHandler<T>(T args, Exception ex) where T : PEvent<T>;
-        public delegate void PMessageHandler<TMessage, TResult>(TMessage args) where TMessage : PMessage<TMessage, TResult>;
-        public delegate void PMessageResultHandler<TResult>(TResult result, Exception ex);
-
-        public void Trigger<TEvent>(TEvent pEvent) where TEvent: PEvent<TEvent>
-        {
-            pEvent.Trigger(this);
-        }
+        public delegate void NuErrorEventHandler<T>(T args, Exception ex) where T : PEvent<T>;
+        public delegate void NuMessageHandler<TMessage, TResult>(TMessage args) where TMessage : PMessage<TMessage, TResult>;
+        public delegate void NuMessageResultHandler<TResult>(TResult result, Exception ex);
 
         private void SetupStaticEventHandlers()
         {
@@ -440,11 +424,11 @@ namespace PEvents
         {
             if (handlers[dt].ContainsKey(t))
             {
-                handlers[dt][t].Add(new PEventWeakDelegate(handler));
+                handlers[dt][t].Add(new NuWeakDelegate(handler));
             }
             else
             {
-                handlers[dt].Add(t, new List<PEventWeakDelegate>() { new PEventWeakDelegate(handler) });
+                handlers[dt].Add(t, new List<NuWeakDelegate>() { new NuWeakDelegate(handler) });
             }
         }
         
@@ -468,7 +452,7 @@ namespace PEvents
             AddEventHandler<T>(handler, DelegateType.EventExecute);
         }
 
-        public void HandleErrorEvent<T>(PEventErrorEventHandler<T> handler)
+        public void HandleErrorEvent<T>(NuErrorEventHandler<T> handler)
             where T : PEvent<T>
         {
             AddEventHandler<T>(handler, DelegateType.EventOnError);
@@ -486,19 +470,19 @@ namespace PEvents
             AddEventHandler<T>(handler, DelegateType.EventOnFinish);
         }
 
-        public void HandleSyncRefreshMessage<TMessage, TResult>(PMessageHandler<TMessage, TResult> handler)
+        public void HandleSyncRefreshMessage<TMessage, TResult>(NuMessageHandler<TMessage, TResult> handler)
             where TMessage : PMessage<TMessage, TResult>
         {
             AddEventHandler<TMessage>(handler, DelegateType.MessageSyncRefreshData);
         }
 
-        public void HandleAsyncRefreshMessage<TMessage, TResult>(PMessageHandler<TMessage, TResult> handler)
+        public void HandleAsyncRefreshMessage<TMessage, TResult>(NuMessageHandler<TMessage, TResult> handler)
             where TMessage : PMessage<TMessage, TResult>
         {
             AddEventHandler<TMessage>(handler, DelegateType.MessageAsyncRefreshData);
         }
 
-        public void HandleDataRefreshedMessage<TMessage, TResult>(PMessageResultHandler<TResult> handler)
+        public void HandleDataRefreshedMessage<TMessage, TResult>(NuMessageResultHandler<TResult> handler)
             where TMessage : PMessage<TMessage, TResult>
         {
             AddEventHandler<TMessage>(handler, DelegateType.MessageDataRefreshed);
@@ -529,7 +513,7 @@ namespace PEvents
             {
                 this.handlers[DelegateType.EventOnError][typeof(T)].ForEach(i =>
                 {
-                    e.Error += System.Delegate.CreateDelegate(typeof(PEventErrorEventHandler<T>), i.IsStatic ? null : i.Object.Target, i.Method) as PEventErrorEventHandler<T>;
+                    e.OnError += System.Delegate.CreateDelegate(typeof(NuErrorEventHandler<T>), i.IsStatic ? null : i.Object.Target, i.Method) as NuErrorEventHandler<T>;
                 });
             }
 
@@ -537,7 +521,7 @@ namespace PEvents
             {
                 this.handlers[DelegateType.EventOnSuccess][typeof(T)].ForEach(i =>
                 {
-                    e.Success += System.Delegate.CreateDelegate(typeof(PEventHandler<T>), i.IsStatic ? null : i.Object.Target, i.Method) as PEventHandler<T>;
+                    e.OnSuccess += System.Delegate.CreateDelegate(typeof(PEventHandler<T>), i.IsStatic ? null : i.Object.Target, i.Method) as PEventHandler<T>;
                 });
             }
 
@@ -545,7 +529,7 @@ namespace PEvents
             {
                 this.handlers[DelegateType.EventOnFinish][typeof(T)].ForEach(i =>
                 {
-                    e.Complete += System.Delegate.CreateDelegate(typeof(PEventHandler<T>), i.IsStatic ? null : i.Object.Target, i.Method) as PEventHandler<T>;
+                    e.OnFinish += System.Delegate.CreateDelegate(typeof(PEventHandler<T>), i.IsStatic ? null : i.Object.Target, i.Method) as PEventHandler<T>;
                 });
             }
             
@@ -560,7 +544,7 @@ namespace PEvents
             {
                 this.handlers[DelegateType.MessageAsyncRefreshData][typeof(TMessage)].ForEach(i =>
                 {
-                    m.AsyncRefreshData += System.Delegate.CreateDelegate(typeof(PMessageHandler<TMessage, TResult>), i.IsStatic ? null : i.Object.Target, i.Method) as PMessageHandler<TMessage, TResult>;
+                    m.AsyncRefreshData += System.Delegate.CreateDelegate(typeof(NuMessageHandler<TMessage, TResult>), i.IsStatic ? null : i.Object.Target, i.Method) as NuMessageHandler<TMessage, TResult>;
                 });
             }
 
@@ -568,7 +552,7 @@ namespace PEvents
             {
                 this.handlers[DelegateType.MessageSyncRefreshData][typeof(TMessage)].ForEach(i =>
                 {
-                    m.SyncRefreshData += System.Delegate.CreateDelegate(typeof(PMessageHandler<TMessage, TResult>), i.IsStatic ? null : i.Object.Target, i.Method) as PMessageHandler<TMessage, TResult>;
+                    m.SyncRefreshData += System.Delegate.CreateDelegate(typeof(NuMessageHandler<TMessage, TResult>), i.IsStatic ? null : i.Object.Target, i.Method) as NuMessageHandler<TMessage, TResult>;
                 });
             }
 
@@ -576,14 +560,14 @@ namespace PEvents
             {
                 this.handlers[DelegateType.MessageDataRefreshed][typeof(TMessage)].ForEach(i =>
                 {
-                    m.DataRefreshed += System.Delegate.CreateDelegate(typeof(PMessageResultHandler<TResult>), i.IsStatic ? null : i.Object.Target, i.Method) as PMessageResultHandler<TResult>;
+                    m.DataRefreshed += System.Delegate.CreateDelegate(typeof(NuMessageResultHandler<TResult>), i.IsStatic ? null : i.Object.Target, i.Method) as NuMessageResultHandler<TResult>;
                 });
             }
         }
 
-        private class PEventWeakDelegate
+        private class NuWeakDelegate
         {
-            public PEventWeakDelegate(Delegate d)
+            public NuWeakDelegate(Delegate d)
             {
                 if (d.Target != null) this.Object = new WeakReference(d.Target);
                 this.Method = d.Method;

@@ -1,0 +1,12 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFrameworks>net452;net461;netstandard2.0</TargetFrameworks>
+    <DebugType>Full</DebugType>
+  </PropertyGroup>
+  
+  <ItemGroup Condition=" '$(TargetFramework)' != 'netstandard2.0' ">
+    <Reference Include="WindowsBase" />
+  </ItemGroup>
+  
+</Project>
