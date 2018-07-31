@@ -25,6 +25,7 @@ namespace PEvents
         public event PEventManager.PEventHandler<TEvent> Complete;
 
         private Task task;
+        private Task completeTask;
         private CancellationTokenSource token;
 
         public PEvent()
@@ -50,18 +51,18 @@ namespace PEvents
 
         public void Abort()
         {
-            if (this.task == null)
-                throw new InvalidOperationException("This event is not in execute phase, so it can't be aborted.");
+            if (this.completeTask == null)
+                throw new InvalidOperationException("This event is not triggered, so it can't be aborted.");
 
             token.Cancel();
         }
         
         public void Wait()
         {
-            if (this.task == null)
-                throw new InvalidOperationException("This event is not in execute phase, so it can't be waited.");
+            if (this.completeTask == null)
+                throw new InvalidOperationException("This event is not triggered, so it can't be waited.");
 
-            this.task.Wait();
+            this.completeTask.Wait();
         }
         
         public virtual void Trigger(PEventManager manager)
@@ -89,12 +90,10 @@ namespace PEvents
             {
                 token = new CancellationTokenSource();
 
-                task = new Task((t) =>
-                    {
-                        this.Execute(this as TEvent);
-                    }, token);
+                task = new Task((t) => this.Execute(this as TEvent), token);
 
-                task.ContinueWith(task => TaskComplete(task, manager));
+                completeTask = task.ContinueWith(task => TaskComplete(task, manager));
+
                 task.Start();
             }
             else
@@ -170,6 +169,7 @@ namespace PEvents
                 finally
                 {
                     this.task = null;
+                    this.completeTask = null;
 
                     if (this.Complete != null)
                         this.Complete(this as TEvent);

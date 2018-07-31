@@ -1,6 +1,7 @@
 using System;
 using Xunit;
 using PEvents;
+using System.Threading;
 
 namespace PEvents.Tests
 {
@@ -14,7 +15,7 @@ namespace PEvents.Tests
         }
 
         [Fact]
-        public void TestBasic()
+        public void TestBasic1()
         {
             var ev = new TestEvent1();
             ev.Prepare += e => e.prepareCounter++;
@@ -22,8 +23,8 @@ namespace PEvents.Tests
             ev.Success += e => e.successCounter++;
             ev.Error += (e, ex) => e.errorCounter++;
             ev.Complete += e => e.completeCounter++;
-            ev.Trigger(manager);
 
+            ev.Trigger(manager);
             ev.Wait();
 
             Assert.Equal(2, ev.prepareCounter);
@@ -31,6 +32,38 @@ namespace PEvents.Tests
             Assert.Equal(2, ev.successCounter);
             Assert.Equal(0, ev.errorCounter);
             Assert.Equal(2, ev.completeCounter);
+        }
+
+        [Fact]
+        public void TestException1 ()
+        {
+            var ev = new TestEvent1();
+            ev.Execute += e => throw new Exception("test");
+            ev.Error += (e, ex) => Assert.Equal("test", ex.Message);
+
+            ev.Trigger(manager);
+            ev.Wait();
+
+            Assert.Equal(1, ev.prepareCounter);
+            Assert.Equal(1, ev.executeCounter);
+            Assert.Equal(0, ev.successCounter);
+            Assert.Equal(1, ev.errorCounter);
+            Assert.Equal(1, ev.completeCounter);
+        }
+
+        [Fact]
+        public void TestThread1()
+        {
+            var ev = new TestEvent1();
+            var tid = Thread.CurrentThread.ManagedThreadId;
+
+            ev.Prepare += e => Assert.Equal(tid, Thread.CurrentThread.ManagedThreadId);
+            ev.Execute += e => Assert.NotEqual(tid, Thread.CurrentThread.ManagedThreadId);
+            ev.Success += e => Assert.NotEqual(tid, Thread.CurrentThread.ManagedThreadId);
+            ev.Complete += e => Assert.NotEqual(tid, Thread.CurrentThread.ManagedThreadId);
+
+            ev.Trigger(manager);
+            ev.Wait();
         }
     }
 
