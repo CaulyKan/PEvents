@@ -65,6 +65,77 @@ namespace PEvents.Tests
             ev.Trigger(manager);
             ev.Wait();
         }
+
+        [Fact]
+        public void TestAbort1()
+        {
+            var ev = new TestEvent1();
+
+            ev.Execute += e => { while (true) e.executeCounter ++; };
+
+            ev.Trigger(manager);
+
+            Thread.Sleep(10);
+            ev.Abort();
+
+            Assert.True(ev.executeCounter > 1);
+            Assert.Equal(0, ev.successCounter);
+            Assert.Equal(0, ev.errorCounter);
+            Assert.Equal(0, ev.completeCounter);
+        }
+
+        [Fact]
+        public void TestAbort2()
+        {
+            var ev = new TestEvent1();
+
+            ev.Execute += e => throw new PEventCancelException();
+
+            ev.Trigger(manager);
+            ev.Wait();
+
+            Assert.Equal(1, ev.executeCounter);
+            Assert.Equal(0, ev.successCounter);
+            Assert.Equal(0, ev.errorCounter);
+            Assert.Equal(1, ev.completeCounter);
+        }
+
+        [Fact]
+        public void TestAbort3()
+        {
+            var ev = new TestEvent1();
+
+            ev.Execute += e => throw new PEventCancelException(true);
+
+            ev.Trigger(manager);
+            ev.Wait();
+
+            Assert.Equal(1, ev.executeCounter);
+            Assert.Equal(1, ev.successCounter);
+            Assert.Equal(0, ev.errorCounter);
+            Assert.Equal(1, ev.completeCounter);
+        }
+
+        [Fact]
+        public void TestAbort4()
+        {
+            var ev = new TestEvent1();
+
+            ev.Execute += e => throw new PEventCancelException(false);
+
+            ev.Trigger(manager);
+            ev.Wait();
+
+            Assert.Equal(1, ev.executeCounter);
+            Assert.Equal(0, ev.successCounter);
+            Assert.Equal(1, ev.errorCounter);
+            Assert.Equal(1, ev.completeCounter);
+        }
+    }
+
+    public class PMesaageTests
+    {
+
     }
 
     class TestEvent1 : PEvent<TestEvent1>
@@ -95,5 +166,10 @@ namespace PEvents.Tests
         {
             completeCounter = 1;
         }
+    }
+
+    class TestMessage1 : PMessage<TestMessage1, string>
+    {
+        
     }
 }

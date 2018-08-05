@@ -106,7 +106,8 @@ namespace PEvents
         {
             try
             {
-                if (e is PEventCancelException && (e as PEventCancelException).Success == true)
+                if (e is PEventCancelException && (e as PEventCancelException).IgnoreSuccess) return;
+                else if (e is PEventCancelException && (e as PEventCancelException).Success)
                 {
                     this.IsSuccess = true;
                     if (this.Success != null)
@@ -136,34 +137,44 @@ namespace PEvents
             
             if (ctrl != null && ctrl is ISynchronizeInvoke && (ctrl as ISynchronizeInvoke).InvokeRequired)
             {
-                (ctrl as ISynchronizeInvoke).Invoke(new Action<Task>(task => TaskComplete(task, manager)), new object[] { t });
+                (ctrl as ISynchronizeInvoke).Invoke(new Action<Task>(task => TaskComplete(task, manager)), new object[] { t, manager });
             }
 #if WPF
             else if (ctrl != null && ctrl is System.Windows.Threading.DispatcherObject && !(ctrl as System.Windows.Threading.DispatcherObject).Dispatcher.CheckAccess())
             {
-                (ctrl as System.Windows.Threading.DispatcherObject).Dispatcher.Invoke(new Action<Task>(task => TaskComplete(task, manager)), new object[] { t });
+                (ctrl as System.Windows.Threading.DispatcherObject).Dispatcher.Invoke(new Action<Task>(task => TaskComplete(task, manager)), new object[] { t, manager });
             }
 #endif
             else
             {
                 try
                 {
-                    if (this.task != null && this.task.IsFaulted &&
-                        !(this.task.Exception.GetBaseException() is PEventCancelException && !(this.task.Exception.GetBaseException() as PEventCancelException).Success))
+                    this.IsSuccess = true;
+
+                    if (this.task != null && this.task.IsFaulted)
                     {
-                        this.IsSuccess = false;
-                        if (this.Error != null)
+                        var exception = this.task.Exception.GetBaseException();
+
+                        if (exception is PEventCancelException) 
                         {
-                            this.Error(this as TEvent, this.task.Exception.GetBaseException());
+                            var canelException = exception as PEventCancelException;
+
+                            if (!canelException.IgnoreSuccess) 
+                            {
+                                if (!canelException.Success) this.IsSuccess = false;
+                            }
+                            else return;
                         }
+                        else this.IsSuccess = false;
                     }
-                    else
+
+                    if (this.IsSuccess) 
                     {
-                        this.IsSuccess = true;
-                        if (this.Success != null)
-                        {
-                            this.Success(this as TEvent);
-                        }
+                        if (this.Success != null) this.Success(this as TEvent);
+                    }
+                    else 
+                    {
+                        if (this.Error != null) this.Error(this as TEvent, this.task.Exception.GetBaseException());
                     }
                 }
                 finally
@@ -196,7 +207,7 @@ namespace PEvents
 
         public PMessage() { }
 
-        public PMessage(TResult init_value)
+        public PMessage(TResult init_value) : this()
         {
             this.Result = init_value;
         }
